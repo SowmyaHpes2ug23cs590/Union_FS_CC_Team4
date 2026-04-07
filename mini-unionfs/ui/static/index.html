@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Mini-UnionFS Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+  /* ── Reset & Variables ─────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg-0:      #09090f;
+    --bg-1:      #0f0f1a;
+    --bg-2:      #14141f;
+    --bg-3:      #1a1a28;
+    --bg-4:      #20202f;
+    --border:    rgba(99, 102, 241, 0.18);
+    --border-hi: rgba(99, 102, 241, 0.45);
+    --indigo:    #6366f1;
+    --indigo-hi: #818cf8;
+    --indigo-lo: rgba(99,102,241,0.12);
+    --cyan:      #22d3ee;
+    --cyan-lo:   rgba(34,211,238,0.12);
+    --green:     #4ade80;
+    --green-lo:  rgba(74,222,128,0.12);
+    --amber:     #fbbf24;
+    --amber-lo:  rgba(251,191,36,0.12);
+    --red:       #f87171;
+    --red-lo:    rgba(248,113,113,0.12);
+    --text-1:    #f1f5f9;
+    --text-2:    #94a3b8;
+    --text-3:    #475569;
+    --radius:    10px;
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'Syne', sans-serif;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg-0);
+    color: var(--text-1);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Noise texture overlay ──────────────────────────────────────── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none; z-index: 0; opacity: 0.5;
+  }
+
+  /* ── Layout ─────────────────────────────────────────────────────── */
+  .app { position: relative; z-index: 1; display: grid; grid-template-rows: auto 1fr; min-height: 100vh; }
+
+  /* ── Header ─────────────────────────────────────────────────────── */
+  header {
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(99,102,241,0.06) 0%, transparent 100%);
+    padding: 0 2rem;
+    display: flex; align-items: center; justify-content: space-between;
+    height: 64px; gap: 1rem;
+  }
+  .logo {
+    display: flex; align-items: center; gap: 0.75rem;
+  }
+  .logo-icon {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, var(--indigo), var(--cyan));
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+    box-shadow: 0 0 20px rgba(99,102,241,0.4);
+  }
+  .logo-text { font-size: 1.1rem; font-weight: 800; letter-spacing: -0.02em; }
+  .logo-text span { color: var(--indigo-hi); }
+
+  .header-right { display: flex; align-items: center; gap: 1rem; }
+
+  .status-pill {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.35rem 0.85rem;
+    border-radius: 100px;
+    font-family: var(--mono); font-size: 0.7rem; font-weight: 500;
+    border: 1px solid var(--border);
+    background: var(--bg-2);
+    transition: all 0.3s;
+  }
+  .status-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--text-3);
+    transition: all 0.3s;
+  }
+  .status-pill.mounted { border-color: rgba(74,222,128,0.35); background: var(--green-lo); color: var(--green); }
+  .status-pill.mounted .status-dot { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 2s infinite; }
+
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  /* ── Main grid ──────────────────────────────────────────────────── */
+  main {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    grid-template-rows: auto 1fr;
+    gap: 0;
+    height: calc(100vh - 64px);
+    overflow: hidden;
+  }
+
+  /* ── Sidebar ─────────────────────────────────────────────────────── */
+  aside {
+    grid-row: 1 / 3;
+    border-right: 1px solid var(--border);
+    background: var(--bg-1);
+    display: flex; flex-direction: column;
+    overflow-y: auto;
+    padding: 1.25rem;
+    gap: 1.25rem;
+  }
+
+  /* ── Control Card ───────────────────────────────────────────────── */
+  .card {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem 1.1rem;
+  }
+  .card-title {
+    font-size: 0.65rem; font-weight: 700; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--text-3);
+    margin-bottom: 0.85rem; display: flex; align-items: center; gap: 0.4rem;
+  }
+  .card-title::before {
+    content: ''; display: inline-block;
+    width: 3px; height: 10px; border-radius: 2px;
+    background: var(--indigo);
+  }
+
+  /* Buttons */
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+    width: 100%; padding: 0.6rem 1rem;
+    border-radius: 7px; border: 1px solid transparent;
+    font-family: var(--mono); font-size: 0.72rem; font-weight: 500;
+    cursor: pointer; transition: all 0.2s; letter-spacing: 0.02em;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn-primary {
+    background: var(--indigo); color: #fff;
+    border-color: var(--indigo-hi);
+    box-shadow: 0 0 20px rgba(99,102,241,0.25);
+  }
+  .btn-primary:hover { background: var(--indigo-hi); box-shadow: 0 0 28px rgba(99,102,241,0.45); }
+  .btn-danger {
+    background: var(--red-lo); color: var(--red);
+    border-color: rgba(248,113,113,0.3);
+  }
+  .btn-danger:hover { background: rgba(248,113,113,0.2); }
+  .btn-ghost {
+    background: var(--bg-3); color: var(--text-2);
+    border-color: var(--border);
+  }
+  .btn-ghost:hover { background: var(--bg-4); color: var(--text-1); border-color: var(--border-hi); }
+  .btn-green {
+    background: var(--green-lo); color: var(--green);
+    border-color: rgba(74,222,128,0.3);
+  }
+  .btn-green:hover { background: rgba(74,222,128,0.2); }
+  .btn-amber {
+    background: var(--amber-lo); color: var(--amber);
+    border-color: rgba(251,191,36,0.3);
+  }
+  .btn-amber:hover { background: rgba(251,191,36,0.2); }
+  .btn-cyan {
+    background: var(--cyan-lo); color: var(--cyan);
+    border-color: rgba(34,211,238,0.3);
+  }
+  .btn-cyan:hover { background: rgba(34,211,238,0.2); }
+
+  .btn-row { display: flex; gap: 0.5rem; }
+  .btn-row .btn { flex: 1; }
+
+  /* Sidebar path info */
+  .path-item {
+    display: flex; flex-direction: column; gap: 0.2rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .path-item:last-child { border-bottom: none; }
+  .path-label { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-3); }
+  .path-value { font-family: var(--mono); font-size: 0.65rem; color: var(--cyan); word-break: break-all; }
+
+  /* Demo steps */
+  .step-list { display: flex; flex-direction: column; gap: 0.5rem; }
+  .step-btn {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.55rem 0.75rem;
+    border-radius: 7px; border: 1px solid var(--border);
+    background: var(--bg-3); cursor: pointer; transition: all 0.2s;
+    text-align: left;
+  }
+  .step-btn:hover { background: var(--bg-4); border-color: var(--border-hi); }
+  .step-num {
+    width: 20px; height: 20px; border-radius: 50%;
+    background: var(--indigo-lo); border: 1px solid var(--border-hi);
+    font-family: var(--mono); font-size: 0.6rem; color: var(--indigo-hi);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .step-info { flex: 1; }
+  .step-name { font-size: 0.7rem; font-weight: 600; color: var(--text-1); }
+  .step-desc { font-size: 0.6rem; color: var(--text-3); margin-top: 1px; }
+
+  /* ── Top bar (layer tabs) ────────────────────────────────────────── */
+  .topbar {
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-1);
+    padding: 0 1.5rem;
+    display: flex; align-items: center; justify-content: space-between;
+    height: 48px;
+  }
+  .tabs { display: flex; gap: 0; height: 100%; }
+  .tab {
+    display: flex; align-items: center; gap: 0.45rem;
+    padding: 0 1.1rem; height: 100%;
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.02em;
+    color: var(--text-3); cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+  }
+  .tab:hover { color: var(--text-2); }
+  .tab.active { color: var(--indigo-hi); border-bottom-color: var(--indigo); }
+  .tab-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .tab[data-layer="lower"] .tab-dot { background: var(--amber); }
+  .tab[data-layer="upper"] .tab-dot { background: var(--cyan); }
+  .tab[data-layer="mount"] .tab-dot { background: var(--green); }
+
+  /* ── Content area ───────────────────────────────────────────────── */
+  .content {
+    overflow-y: auto;
+    padding: 1.5rem;
+    display: flex; flex-direction: column; gap: 1.25rem;
+  }
+
+  /* ── Layer grid ─────────────────────────────────────────────────── */
+  .layers-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 1rem;
+  }
+  .layer-panel {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+  .layer-panel:hover { border-color: var(--border-hi); }
+  .layer-header {
+    padding: 0.65rem 0.9rem;
+    display: flex; align-items: center; gap: 0.6rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .layer-icon {
+    width: 28px; height: 28px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+  }
+  .layer-lower .layer-icon { background: var(--amber-lo); }
+  .layer-upper .layer-icon { background: var(--cyan-lo); }
+  .layer-mount .layer-icon { background: var(--green-lo); }
+  .layer-name { font-size: 0.72rem; font-weight: 700; flex: 1; }
+  .layer-lower .layer-name { color: var(--amber); }
+  .layer-upper .layer-name { color: var(--cyan); }
+  .layer-mount .layer-name { color: var(--green); }
+  .layer-badge {
+    font-family: var(--mono); font-size: 0.58rem; padding: 0.15rem 0.45rem;
+    border-radius: 100px;
+  }
+  .layer-lower .layer-badge { background: var(--amber-lo); color: var(--amber); }
+  .layer-upper .layer-badge { background: var(--cyan-lo); color: var(--cyan); }
+  .layer-mount .layer-badge { background: var(--green-lo); color: var(--green); }
+
+  .file-list { padding: 0.5rem; min-height: 80px; }
+  .file-item {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.4rem 0.5rem; border-radius: 5px;
+    cursor: pointer; transition: background 0.15s;
+    font-family: var(--mono); font-size: 0.65rem;
+  }
+  .file-item:hover { background: var(--bg-3); }
+  .file-item.whiteout { opacity: 0.5; }
+  .file-icon { font-size: 12px; flex-shrink: 0; }
+  .file-name { flex: 1; color: var(--text-2); }
+  .file-name.whiteout-name { color: var(--red); text-decoration: line-through; }
+  .file-size { color: var(--text-3); font-size: 0.58rem; }
+  .empty-layer {
+    display: flex; align-items: center; justify-content: center;
+    padding: 1.5rem; color: var(--text-3); font-size: 0.65rem;
+    font-family: var(--mono);
+  }
+
+  /* ── Log / Terminal ─────────────────────────────────────────────── */
+  .log-panel {
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .log-header {
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .log-title {
+    font-size: 0.65rem; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--text-3);
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .log-clear {
+    font-family: var(--mono); font-size: 0.6rem; color: var(--text-3);
+    background: none; border: none; cursor: pointer; padding: 0.2rem 0.5rem;
+    border-radius: 4px; transition: all 0.2s;
+  }
+  .log-clear:hover { color: var(--text-2); background: var(--bg-3); }
+  .log-body {
+    font-family: var(--mono); font-size: 0.68rem; line-height: 1.7;
+    padding: 0.75rem 1rem;
+    max-height: 220px; overflow-y: auto;
+    color: var(--text-2);
+  }
+  .log-entry { display: flex; gap: 0.75rem; }
+  .log-time { color: var(--text-3); flex-shrink: 0; }
+  .log-msg.success { color: var(--green); }
+  .log-msg.error   { color: var(--red); }
+  .log-msg.info    { color: var(--cyan); }
+  .log-msg.warn    { color: var(--amber); }
+
+  /* ── File viewer modal ──────────────────────────────────────────── */
+  .modal-overlay {
+    position: fixed; inset: 0; z-index: 100;
+    background: rgba(9,9,15,0.85);
+    backdrop-filter: blur(4px);
+    display: none; align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; animation: fadein 0.2s; }
+  @keyframes fadein { from{opacity:0} to{opacity:1} }
+  .modal {
+    background: var(--bg-2);
+    border: 1px solid var(--border-hi);
+    border-radius: 12px;
+    width: min(640px, 90vw);
+    max-height: 80vh;
+    display: flex; flex-direction: column;
+    box-shadow: 0 25px 60px rgba(0,0,0,0.6);
+  }
+  .modal-header {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .modal-title { font-size: 0.8rem; font-weight: 700; font-family: var(--mono); color: var(--indigo-hi); }
+  .modal-close {
+    width: 28px; height: 28px; border-radius: 6px;
+    background: var(--bg-3); border: 1px solid var(--border);
+    color: var(--text-2); cursor: pointer; font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+  }
+  .modal-close:hover { background: var(--red-lo); color: var(--red); border-color: rgba(248,113,113,0.3); }
+  .modal-body { flex: 1; overflow-y: auto; padding: 1rem 1.25rem; }
+  .file-content {
+    font-family: var(--mono); font-size: 0.72rem; line-height: 1.7;
+    color: var(--green); white-space: pre-wrap; word-break: break-all;
+  }
+
+  /* ── Create file panel ──────────────────────────────────────────── */
+  .create-panel {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem 1.1rem;
+  }
+  .input-row { display: flex; gap: 0.5rem; align-items: flex-start; flex-wrap: wrap; }
+  .field { display: flex; flex-direction: column; gap: 0.35rem; flex: 1; min-width: 120px; }
+  .field label { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-3); }
+  .field input, .field textarea {
+    background: var(--bg-3); border: 1px solid var(--border);
+    border-radius: 6px; padding: 0.5rem 0.7rem;
+    font-family: var(--mono); font-size: 0.7rem; color: var(--text-1);
+    outline: none; transition: border-color 0.2s; resize: none;
+  }
+  .field input:focus, .field textarea:focus { border-color: var(--indigo); }
+  .field textarea { min-height: 60px; }
+
+  /* ── Scrollbars ─────────────────────────────────────────────────── */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 10px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+
+  /* ── Spinner ────────────────────────────────────────────────────── */
+  .spin {
+    display: inline-block;
+    width: 12px; height: 12px;
+    border: 2px solid transparent;
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Responsive ─────────────────────────────────────────────────── */
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; }
+    aside { grid-row: auto; max-height: 300px; }
+    .layers-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- ── Header ───────────────────────────────────────────────────────── -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">🗂</div>
+    <div class="logo-text">Mini-<span>UnionFS</span></div>
+  </div>
+  <div class="header-right">
+    <div class="status-pill" id="statusPill">
+      <div class="status-dot"></div>
+      <span id="statusText">Checking…</span>
+    </div>
+  </div>
+</header>
+
+<!-- ── Main ─────────────────────────────────────────────────────────── -->
+<main>
+
+  <!-- ── Sidebar ──────────────────────────────────────────────────── -->
+  <aside>
+
+    <!-- Mount controls -->
+    <div class="card">
+      <div class="card-title">🔌 Filesystem Control</div>
+      <div style="display:flex;flex-direction:column;gap:0.5rem;">
+        <button class="btn btn-primary" id="btnMount" onclick="doMount()">
+          <span>▶</span> Mount Filesystem
+        </button>
+        <button class="btn btn-danger" id="btnUnmount" onclick="doUnmount()" disabled>
+          <span>■</span> Unmount
+        </button>
+        <button class="btn btn-ghost" onclick="doReset()" style="margin-top:0.25rem;">
+          ↺ Reset Layers
+        </button>
+      </div>
+    </div>
+
+    <!-- Paths info -->
+    <div class="card">
+      <div class="card-title">📁 Layer Paths</div>
+      <div class="path-item">
+        <span class="path-label">🟡 Lower (read-only)</span>
+        <span class="path-value" id="pathLower">…</span>
+      </div>
+      <div class="path-item">
+        <span class="path-label">🔵 Upper (writable)</span>
+        <span class="path-value" id="pathUpper">…</span>
+      </div>
+      <div class="path-item">
+        <span class="path-label">🟢 Mount (merged view)</span>
+        <span class="path-value" id="pathMount">…</span>
+      </div>
+    </div>
+
+    <!-- Demo steps -->
+    <div class="card">
+      <div class="card-title">🎬 Demo Steps</div>
+      <div class="step-list">
+        <div class="step-btn" onclick="doSeed()">
+          <div class="step-num">1</div>
+          <div class="step-info">
+            <div class="step-name">Seed Lower Layer</div>
+            <div class="step-desc">Create base.txt, config.txt, delete_me.txt</div>
+          </div>
+        </div>
+        <div class="step-btn" onclick="doMount()">
+          <div class="step-num">2</div>
+          <div class="step-info">
+            <div class="step-name">Mount Filesystem</div>
+            <div class="step-desc">Merge lower + upper into mnt/</div>
+          </div>
+        </div>
+        <div class="step-btn" onclick="doCow()">
+          <div class="step-num">3</div>
+          <div class="step-info">
+            <div class="step-name">Trigger CoW</div>
+            <div class="step-desc">Edit base.txt → copied to upper</div>
+          </div>
+        </div>
+        <div class="step-btn" onclick="doWhiteout()">
+          <div class="step-num">4</div>
+          <div class="step-info">
+            <div class="step-name">Delete → Whiteout</div>
+            <div class="step-desc">delete_me.txt hidden via .wh. marker</div>
+          </div>
+        </div>
+        <div class="step-btn" onclick="openCreate()">
+          <div class="step-num">5</div>
+          <div class="step-info">
+            <div class="step-name">Create New File</div>
+            <div class="step-desc">New file goes directly to upper</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ── Top bar ──────────────────────────────────────────────────── -->
+  <div class="topbar">
+    <div class="tabs">
+      <div class="tab active" data-layer="overview" onclick="setTab('overview')">
+        <span>Overview</span>
+      </div>
+      <div class="tab" data-layer="lower" onclick="setTab('lower')">
+        <span class="tab-dot"></span><span>lower/</span>
+      </div>
+      <div class="tab" data-layer="upper" onclick="setTab('upper')">
+        <span class="tab-dot"></span><span>upper/</span>
+      </div>
+      <div class="tab" data-layer="mount" onclick="setTab('mount')">
+        <span class="tab-dot"></span><span>mnt/ (merged)</span>
+      </div>
+    </div>
+    <button class="btn btn-ghost" style="padding:0.3rem 0.7rem;width:auto;font-size:0.65rem;" onclick="refreshLayers()">
+      ↻ Refresh
+    </button>
+  </div>
+
+  <!-- ── Content ──────────────────────────────────────────────────── -->
+  <div class="content" id="content">
+
+    <!-- Overview tab -->
+    <div id="tab-overview">
+      <div class="layers-grid">
+        <!-- Lower -->
+        <div class="layer-panel layer-lower">
+          <div class="layer-header">
+            <div class="layer-icon">🔒</div>
+            <div class="layer-name">lower/</div>
+            <div class="layer-badge">READ-ONLY</div>
+          </div>
+          <div class="file-list" id="files-lower">
+            <div class="empty-layer">— empty —</div>
+          </div>
+        </div>
+        <!-- Upper -->
+        <div class="layer-panel layer-upper">
+          <div class="layer-header">
+            <div class="layer-icon">✏️</div>
+            <div class="layer-name">upper/</div>
+            <div class="layer-badge">WRITABLE</div>
+          </div>
+          <div class="file-list" id="files-upper">
+            <div class="empty-layer">— empty —</div>
+          </div>
+        </div>
+        <!-- Mount -->
+        <div class="layer-panel layer-mount">
+          <div class="layer-header">
+            <div class="layer-icon">🔗</div>
+            <div class="layer-name">mnt/</div>
+            <div class="layer-badge">MERGED VIEW</div>
+          </div>
+          <div class="file-list" id="files-mount">
+            <div class="empty-layer" id="mount-empty">mount not active</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Create file row -->
+      <div class="create-panel">
+        <div class="card-title" style="margin-bottom:0.75rem;">➕ Create File via Mount</div>
+        <div class="input-row">
+          <div class="field" style="max-width:180px;">
+            <label>Filename</label>
+            <input type="text" id="newFileName" placeholder="myfile.txt"/>
+          </div>
+          <div class="field">
+            <label>Content</label>
+            <textarea id="newFileContent" placeholder="File content…">Hello from Mini-UnionFS!</textarea>
+          </div>
+          <div style="display:flex;align-items:flex-end;">
+            <button class="btn btn-green" style="width:auto;padding:0.5rem 1.1rem;" onclick="doCreate()">
+              Create →
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Log -->
+      <div class="log-panel">
+        <div class="log-header">
+          <div class="log-title">
+            <span style="color:var(--green)">●</span> Activity Log
+          </div>
+          <button class="log-clear" onclick="clearLog()">Clear</button>
+        </div>
+        <div class="log-body" id="logBody">
+          <div class="log-entry">
+            <span class="log-time">--:--:--</span>
+            <span class="log-msg info">Dashboard ready. Click a demo step to begin.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Single layer tabs -->
+    <div id="tab-lower"  style="display:none;"></div>
+    <div id="tab-upper"  style="display:none;"></div>
+    <div id="tab-mount"  style="display:none;"></div>
+
+  </div>
+
+</main>
+</div>
+
+<!-- ── File viewer modal ─────────────────────────────────────────────── -->
+<div class="modal-overlay" id="fileModal" onclick="closeModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title" id="modalTitle">file.txt</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <pre class="file-content" id="modalContent">loading…</pre>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────
+let mounted = false;
+let currentTab = 'overview';
+let pollingTimer = null;
+
+// ── Utilities ──────────────────────────────────────────────────────────
+function now() {
+  return new Date().toLocaleTimeString('en-US', {hour12:false});
+}
+
+function log(msg, type='info') {
+  const body = document.getElementById('logBody');
+  const el = document.createElement('div');
+  el.className = 'log-entry';
+  el.innerHTML = `<span class="log-time">${now()}</span><span class="log-msg ${type}">${msg}</span>`;
+  body.appendChild(el);
+  body.scrollTop = body.scrollHeight;
+}
+
+function clearLog() {
+  document.getElementById('logBody').innerHTML = '';
+}
+
+function fmt_size(b) {
+  if (b < 1024) return b + ' B';
+  return (b/1024).toFixed(1) + ' KB';
+}
+
+// ── API calls ──────────────────────────────────────────────────────────
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  return r.json();
+}
+
+// ── Status ─────────────────────────────────────────────────────────────
+async function checkStatus() {
+  try {
+    const d = await api('GET', '/api/status');
+    mounted = d.mounted;
+    const pill = document.getElementById('statusPill');
+    const txt  = document.getElementById('statusText');
+    if (mounted) {
+      pill.className = 'status-pill mounted';
+      txt.textContent = 'MOUNTED';
+    } else {
+      pill.className = 'status-pill';
+      txt.textContent = 'UNMOUNTED';
+    }
+    document.getElementById('btnMount').disabled   = mounted;
+    document.getElementById('btnUnmount').disabled = !mounted;
+    document.getElementById('pathLower').textContent = d.lower_dir || '—';
+    document.getElementById('pathUpper').textContent = d.upper_dir || '—';
+    document.getElementById('pathMount').textContent = d.mnt_dir   || '—';
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+// ── Layers ─────────────────────────────────────────────────────────────
+function renderFiles(containerId, files, layerKey) {
+  const el = document.getElementById(containerId);
+  if (!files || files.length === 0) {
+    el.innerHTML = '<div class="empty-layer">— empty —</div>';
+    return;
+  }
+  el.innerHTML = files.map(f => {
+    const isWh = f.is_whiteout;
+    const icon = f.type === 'dir' ? '📁' : (isWh ? '🚫' : '📄');
+    const nameClass = isWh ? 'file-name whiteout-name' : 'file-name';
+    const click = isWh ? '' : `onclick="viewFile('${layerKey}','${f.name}')"`;
+    return `<div class="file-item${isWh?' whiteout':''}" ${click} title="${isWh?'Whiteout marker':'Click to view'}">
+      <span class="file-icon">${icon}</span>
+      <span class="${nameClass}">${f.name}</span>
+      <span class="file-size">${f.type==='dir'?'DIR':fmt_size(f.size)}</span>
+    </div>`;
+  }).join('');
+}
+
+async function refreshLayers() {
+  try {
+    const d = await api('GET', '/api/layers');
+    renderFiles('files-lower', d.lower, 'lower');
+    renderFiles('files-upper', d.upper, 'upper');
+    if (mounted) {
+      renderFiles('files-mount', d.mount, 'mount');
+    } else {
+      document.getElementById('files-mount').innerHTML = '<div class="empty-layer">mount not active</div>';
+    }
+    // Also refresh single-layer tabs
+    renderSingleTab('lower', d.lower);
+    renderSingleTab('upper', d.upper);
+    renderSingleTab('mount', mounted ? d.mount : []);
+  } catch(e) { log('Failed to refresh layers: ' + e, 'error'); }
+}
+
+function renderSingleTab(layer, files) {
+  const el = document.getElementById('tab-' + layer);
+  const colors = {lower:'var(--amber)',upper:'var(--cyan)',mount:'var(--green)'};
+  const labels = {lower:'lower/ — Read-Only Base Layer',upper:'upper/ — Writable Container Layer',mount:'mnt/ — Merged View'};
+  if (!files || files.length === 0) {
+    el.innerHTML = `<div class="card"><div style="color:var(--text-3);font-family:var(--mono);font-size:0.7rem;padding:1rem;">— No files in ${layer}/ —</div></div>`;
+    return;
+  }
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-title" style="color:${colors[layer]}">${labels[layer]}</div>
+      ${files.map(f => {
+        const isWh = f.is_whiteout;
+        const icon = f.type==='dir'?'📁':(isWh?'🚫':'📄');
+        const click = isWh?'':` onclick="viewFile('${layer}','${f.name}')"`;
+        return `<div class="file-item${isWh?' whiteout':''}"${click}>
+          <span class="file-icon">${icon}</span>
+          <span class="${isWh?'file-name whiteout-name':'file-name'}">${f.name}</span>
+          <span class="file-size">${f.type==='dir'?'DIR':fmt_size(f.size)}</span>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+// ── Tabs ───────────────────────────────────────────────────────────────
+function setTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.layer === tab);
+  });
+  ['overview','lower','upper','mount'].forEach(t => {
+    document.getElementById('tab-'+t).style.display = (t===tab)?'':'none';
+  });
+}
+
+// ── Operations ─────────────────────────────────────────────────────────
+async function doMount() {
+  log('Mounting filesystem…', 'info');
+  document.getElementById('btnMount').innerHTML = '<span class="spin"></span> Mounting…';
+  document.getElementById('btnMount').disabled = true;
+  const d = await api('POST', '/api/mount');
+  document.getElementById('btnMount').innerHTML = '<span>▶</span> Mount Filesystem';
+  log(d.msg, d.ok ? 'success' : 'error');
+  await checkStatus();
+  await refreshLayers();
+}
+
+async function doUnmount() {
+  log('Unmounting…', 'warn');
+  const d = await api('POST', '/api/unmount');
+  log(d.msg, d.ok ? 'success' : 'error');
+  await checkStatus();
+  await refreshLayers();
+}
+
+async function doReset() {
+  if (!confirm('Reset all layers? This will unmount and wipe lower/ and upper/ contents.')) return;
+  log('Resetting layers…', 'warn');
+  const d = await api('POST', '/api/demo/reset');
+  log(d.msg, d.ok ? 'success' : 'error');
+  await checkStatus();
+  await refreshLayers();
+}
+
+async function doSeed() {
+  log('Seeding lower layer with sample files…', 'info');
+  const d = await api('POST', '/api/demo/seed');
+  log(d.msg, d.ok ? 'success' : 'error');
+  await refreshLayers();
+}
+
+async function doCow() {
+  if (!mounted) { log('Mount the filesystem first (Step 2).', 'warn'); return; }
+  log('Triggering Copy-on-Write: editing base.txt via mount…', 'info');
+  const d = await api('POST', '/api/demo/cow');
+  if (d.ok) {
+    log(d.msg, 'success');
+    log(`CoW result → in_upper: ${d.in_upper}, lower_untouched: ${d.lower_untouched}`, 'info');
+  } else {
+    log(d.msg, 'error');
+  }
+  await refreshLayers();
+}
+
+async function doWhiteout() {
+  if (!mounted) { log('Mount the filesystem first (Step 2).', 'warn'); return; }
+  log('Deleting delete_me.txt via mount → creating whiteout…', 'info');
+  const d = await api('POST', '/api/demo/whiteout');
+  if (d.ok) {
+    log(d.msg, 'success');
+    log(`Whiteout: exists=${d.whiteout_exists}, lower_preserved=${d.lower_preserved}, hidden=${d.hidden_from_mount}`, 'info');
+  } else {
+    log(d.msg, 'error');
+  }
+  await refreshLayers();
+}
+
+function openCreate() {
+  document.getElementById('newFileName').focus();
+  setTab('overview');
+}
+
+async function doCreate() {
+  const name    = document.getElementById('newFileName').value.trim();
+  const content = document.getElementById('newFileContent').value;
+  if (!name) { log('Enter a filename first.', 'warn'); return; }
+  if (!mounted) { log('Mount the filesystem first (Step 2).', 'warn'); return; }
+  log(`Creating '${name}' via mount…`, 'info');
+  const d = await api('POST', '/api/demo/create', {name, content});
+  log(d.msg, d.ok ? 'success' : 'error');
+  if (d.ok) log(`File stored in upper: ${d.in_upper}`, 'info');
+  await refreshLayers();
+}
+
+// ── File viewer ────────────────────────────────────────────────────────
+async function viewFile(layer, name) {
+  document.getElementById('modalTitle').textContent = `${layer}/${name}`;
+  document.getElementById('modalContent').textContent = 'Loading…';
+  document.getElementById('fileModal').classList.add('open');
+  const d = await api('GET', `/api/read?layer=${layer}&name=${encodeURIComponent(name)}`);
+  document.getElementById('modalContent').textContent = d.ok ? d.content : d.content;
+}
+
+function closeModal(e) {
+  if (!e || e.target === document.getElementById('fileModal'))
+    document.getElementById('fileModal').classList.remove('open');
+}
+document.addEventListener('keydown', e => { if(e.key==='Escape') closeModal(); });
+
+// ── Init ───────────────────────────────────────────────────────────────
+async function init() {
+  await checkStatus();
+  await refreshLayers();
+  // Poll status every 3s
+  pollingTimer = setInterval(async () => {
+    await checkStatus();
+    await refreshLayers();
+  }, 3000);
+}
+
+init();
+</script>
+</body>
+</html>
